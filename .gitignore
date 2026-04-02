@@ -1,0 +1,7 @@
+*.pkg
+*.dmg
+*.iso
+*.img
+*.hfs
+macos_convert/
+macos_usb_creator/
