@@ -490,6 +490,453 @@ flash_usb() {
 }
 
 # ══════════════════════════════════════════════
+# Instalador Offline Completo com OpenCore
+# ══════════════════════════════════════════════
+
+oc_get_asset_url() {
+    local repo="$1" pattern="$2"
+    curl -s "https://api.github.com/repos/$repo/releases/latest" | \
+        python3 -c "
+import sys,json
+r=json.load(sys.stdin)
+for a in r.get('assets',[]):
+    n=a['name']
+    if '$pattern' in n:
+        print(a['browser_download_url'])
+        break
+" 2>/dev/null
+}
+
+oc_download_cache() {
+    local url="$1"
+    local fname; fname=$(basename "$url")
+    local cache="$WORK_DIR/oc_cache/$fname"
+    mkdir -p "$WORK_DIR/oc_cache"
+    if [ ! -f "$cache" ]; then
+        info "Baixando $fname..."
+        curl -L --progress-bar -o "$cache" "$url" || error "Falha ao baixar $url"
+    else
+        info "$fname (cache)"
+    fi
+    echo "$cache"
+}
+
+oc_fetch_kexts() {
+    local repo="$1" pattern="$2" dest_kexts="$3"
+    local url; url=$(oc_get_asset_url "$repo" "$pattern")
+    [ -z "$url" ] && { warn "Nao encontrou '$pattern' em $repo"; return 0; }
+    local cache; cache=$(oc_download_cache "$url")
+    local extract_dir="$WORK_DIR/oc_extract/$(echo "$repo" | tr '/' '_')"
+    rm -rf "$extract_dir"; mkdir -p "$extract_dir"
+    7z x "$cache" -o"$extract_dir" -y > /dev/null 2>&1 || true
+    local found=0
+    while IFS= read -r -d '' k; do
+        cp -r "$k" "$dest_kexts/"
+        info "  ✓ $(basename "$k")"
+        found=$((found + 1))
+    done < <(find "$extract_dir" -name "*.kext" -type d -print0 2>/dev/null)
+    [ $found -eq 0 ] && warn "Nenhum .kext encontrado em $repo"
+}
+
+build_opencore_efi() {
+    local efi_dir="$1"
+    step "Baixando OpenCore e kexts"
+    mkdir -p "$efi_dir/BOOT" "$efi_dir/OC/Drivers" \
+             "$efi_dir/OC/Kexts" "$efi_dir/OC/ACPI" \
+             "$efi_dir/OC/Tools" "$efi_dir/OC/Resources"
+
+    # OpenCorePkg
+    info "Baixando OpenCorePkg..."
+    local oc_url; oc_url=$(oc_get_asset_url "acidanthera/OpenCorePkg" "RELEASE.zip")
+    [ -z "$oc_url" ] && error "Nao encontrou OpenCorePkg RELEASE.zip"
+    local oc_cache; oc_cache=$(oc_download_cache "$oc_url")
+    local oc_ex="$WORK_DIR/oc_extract/OpenCorePkg"
+    rm -rf "$oc_ex"; mkdir -p "$oc_ex"
+    7z x "$oc_cache" -o"$oc_ex" -y > /dev/null 2>&1 || true
+
+    local bootx64; bootx64=$(find "$oc_ex" -name "BOOTx64.efi" | head -1)
+    [ -f "$bootx64" ] && cp "$bootx64" "$efi_dir/BOOT/" && info "  ✓ BOOTx64.efi"
+    local oc_efi; oc_efi=$(find "$oc_ex" -path "*/OC/OpenCore.efi" | head -1)
+    [ -f "$oc_efi" ] && cp "$oc_efi" "$efi_dir/OC/" && info "  ✓ OpenCore.efi"
+    for drv in OpenRuntime.efi ResetNvramEntry.efi; do
+        local f; f=$(find "$oc_ex" -name "$drv" | head -1)
+        [ -f "$f" ] && cp "$f" "$efi_dir/OC/Drivers/" && info "  ✓ $drv"
+    done
+
+    # HfsPlus.efi (necessario para ler particoes HFS+ do instalador)
+    info "Baixando HfsPlus.efi..."
+    curl -L --progress-bar -o "$efi_dir/OC/Drivers/HfsPlus.efi" \
+        "https://github.com/acidanthera/OcBinaryData/raw/master/Drivers/HfsPlus.efi" \
+        && info "  ✓ HfsPlus.efi" || warn "Nao foi possivel baixar HfsPlus.efi"
+
+    # Kexts
+    info "Baixando kexts..."
+    local kdir="$efi_dir/OC/Kexts"
+    oc_fetch_kexts "acidanthera/Lilu"             "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/WhateverGreen"    "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/VirtualSMC"       "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/AirportBrcmFixup" "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/BrcmPatchRAM"     "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/RestrictEvents"   "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/CryptexFixup"     "RELEASE.zip" "$kdir"
+
+    info "Kexts instalados:"
+    ls "$kdir/" 2>/dev/null || true
+}
+
+generate_config_plist() {
+    local model="$1" kexts_dir="$2" out_file="$3"
+    info "Gerando config.plist para $model..."
+
+    SMBIOS_MODEL="$model" OC_KEXTS_DIR="$kexts_dir" OC_CONFIG_OUT="$out_file" \
+    python3 << 'PYEOF'
+import plistlib, os, uuid
+
+model     = os.environ["SMBIOS_MODEL"]
+kexts_dir = os.environ["OC_KEXTS_DIR"]
+out_file  = os.environ["OC_CONFIG_OUT"]
+
+kext_order = [
+    "Lilu", "WhateverGreen", "VirtualSMC",
+    "SMCBatteryManager", "SMCLightSensor", "SMCProcessor", "SMCSuperIO",
+    "AirportBrcmFixup",
+    "BrcmFirmwareData", "BrcmPatchRAM3", "BrcmBluetoothInjector",
+    "RestrictEvents", "CryptexFixup",
+]
+
+min_max = {
+    "BrcmBluetoothInjector": ("", "20.99.99"),
+    "CryptexFixup":          ("23.0.0", ""),
+}
+
+def has_kext(name):
+    return os.path.isdir(os.path.join(kexts_dir, name + ".kext"))
+
+def exec_path(name):
+    p = os.path.join(kexts_dir, name + ".kext", "Contents", "MacOS", name)
+    return f"Contents/MacOS/{name}" if os.path.isfile(p) else ""
+
+kext_entries = []
+for name in kext_order:
+    if not has_kext(name):
+        continue
+    mn, mx = min_max.get(name, ("", ""))
+    kext_entries.append({
+        "Arch": "x86_64", "BundlePath": f"{name}.kext", "Comment": "",
+        "Enabled": True, "ExecutablePath": exec_path(name),
+        "MaxKernel": mx, "MinKernel": mn, "PlistPath": "Contents/Info.plist",
+    })
+
+drivers = ["HfsPlus.efi", "OpenRuntime.efi", "ResetNvramEntry.efi"]
+driver_entries = [{"Arguments": "", "Comment": "", "Enabled": True, "Path": d} for d in drivers]
+
+config = {
+    "ACPI": {"Add": [], "Delete": [], "Patch": [], "Quirks": {
+        "FadtEnableReset": False, "NormalizeHeaders": False,
+        "RebaseRegions": False, "ResetHwSig": False,
+        "ResetLogoStatus": True, "SyncTableIds": False,
+    }},
+    "Booter": {"MmioWhitelist": [], "Patch": [], "Quirks": {
+        "AllowRelocationBlock": True, "AvoidRuntimeDefrag": True,
+        "DevirtualiseMmio": False, "DisableSingleUser": False,
+        "DisableVariableWrite": False, "DiscardHibernateMap": False,
+        "EnableSafeModeSlide": True, "EnableWriteUnprotector": False,
+        "ForceBooterSignature": False, "ForceExitBootServices": False,
+        "ProtectMemoryRegions": False, "ProtectSecureBoot": False,
+        "ProtectUefiServices": False, "ProvideCustomSlide": True,
+        "ProvideMaxSlide": 0, "RebuildAppleMemoryMap": True,
+        "ResizeAppleGpuBars": -1, "SetupVirtualMap": True,
+        "SignalAppleOS": False, "SyncRuntimePermissions": True,
+    }},
+    "DeviceProperties": {"Add": {}, "Delete": {}},
+    "Kernel": {
+        "Add": kext_entries, "Block": [], "Force": [], "Patch": [],
+        "Emulate": {"Cpuid1Data": bytes(16), "Cpuid1Mask": bytes(16),
+                    "DummyPowerManagement": False, "MaxKernel": "", "MinKernel": ""},
+        "Quirks": {
+            "AppleCpuPmCfgLock": False, "AppleXcpmCfgLock": True,
+            "AppleXcpmExtraMsrs": False, "AppleXcpmForceBoost": False,
+            "CustomPciSerialDevice": False, "CustomSMBIOSGuid": False,
+            "DisableIoMapper": True, "DisableIoMapperMapping": False,
+            "DisableLinkeditJettison": True, "DisableRtcChecksum": False,
+            "ExtendBTFeatureFlags": False, "ExternalDiskIcons": False,
+            "ForceAquantiaEthernet": False, "ForceSecureBootScheme": False,
+            "IncreasePciBarSize": False, "LapicKernelPanic": False,
+            "LegacyCommpage": False, "PanicNoKextDump": True,
+            "PowerTimeoutKernelPanic": True, "ProvideCurrentCpuInfo": False,
+            "SetApfsTrimTimeout": -1, "ThirdPartyDrives": False,
+            "XhciPortLimit": True,
+        },
+        "Scheme": {"CustomKernel": False, "FuzzyMatch": True,
+                   "KernelArch": "x86_64", "KernelCache": "Auto"},
+    },
+    "Misc": {
+        "BlessOverride": [], "Entries": [], "Tools": [],
+        "Boot": {
+            "ConsoleAttributes": 0, "HibernateMode": "None",
+            "HideAuxiliary": False, "LauncherOption": "Disabled",
+            "LauncherPath": "Default", "PickerAttributes": 17,
+            "PickerAudioAssist": False, "PickerMode": "Builtin",
+            "PickerVariant": "Auto", "PollAppleHotKeys": True,
+            "ShowPicker": True, "TakeoffDelay": 0, "Timeout": 5,
+        },
+        "Debug": {
+            "AppleDebug": False, "ApplePanic": False,
+            "DisableWatchDog": True, "DisplayDelay": 0,
+            "DisplayLevel": 2147483650, "LogModules": "*",
+            "SerialInit": False, "SysReport": False, "Target": 3,
+        },
+        "Security": {
+            "AllowSetDefault": True, "ApECID": 0, "AuthRestart": False,
+            "BlacklistAppleUpdate": True, "DmgLoading": "Any",
+            "EnablePassword": False, "ExposeSensitiveData": 6,
+            "HaltLevel": 2147483648, "Hibernate": 0,
+            "PasswordHash": bytes(0), "PasswordSalt": bytes(0),
+            "ScanPolicy": 0, "SecureBootModel": "Disabled", "Vault": "Optional",
+        },
+        "Serial": {"Init": False, "Override": False},
+    },
+    "NVRAM": {
+        "Add": {
+            "4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14": {
+                "DefaultBackgroundColor": bytes.fromhex("00000000"),
+                "UIScale": bytes([1]),
+            },
+            "7C436110-AB2A-4BBB-A880-FE41995C9F82": {
+                "boot-args": "-v keepsyms=1 amfi_get_out_of_my_way=0x01 brcmfx-driver=2 revpatch=sbvmm,asset",
+                "csr-active-config": bytes.fromhex("03080000"),
+                "prev-lang:kbd": "en-US:0",
+                "run-efi-updater": "No",
+                "SystemAudioVolume": bytes([0x46]),
+            },
+        },
+        "Delete": {
+            "4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14": [],
+            "7C436110-AB2A-4BBB-A880-FE41995C9F82": ["csr-active-config", "boot-args", "prev-lang:kbd"],
+        },
+        "LegacyOverwrite": False, "LegacySchema": {}, "WriteFlash": True,
+    },
+    "PlatformInfo": {
+        "Automatic": True, "CustomMemory": False,
+        "Generic": {
+            "AdviseFeatures": False, "MaxBIOSVersion": False,
+            "MLB": "C02634902GPHYAQ1H", "ProcessorType": 0,
+            "ROM": bytes.fromhex("112233445566"), "SpoofVendor": True,
+            "SystemMemoryStatus": "Auto", "SystemProductName": model,
+            "SystemSerialNumber": "C02TQ0KSFVH3",
+            "SystemUUID": str(uuid.uuid4()).upper(),
+            "UpdateSMBIOSMode": "Create",
+        },
+        "UpdateDataHub": True, "UpdateNVRAM": True, "UpdateSMBIOS": True,
+    },
+    "UEFI": {
+        "APFS": {
+            "EnableJumpstart": True, "GlobalConnect": False, "HideVerbose": True,
+            "JumpstartHotPlug": False, "MinDate": -1, "MinVersion": -1,
+        },
+        "Audio": {
+            "AudioCodec": 0, "AudioDevice": "", "AudioOutMask": -1,
+            "AudioSupport": False, "DisconnectHda": False, "MaximumGainDBm": 0,
+            "MinimumAssistGainDBm": -128, "MinimumAudibleGainDBm": -55,
+            "PlayChime": "Disabled", "ResetTrafficClass": False, "SetupDelay": 0,
+        },
+        "ConnectDrivers": True,
+        "Drivers": driver_entries,
+        "Input": {
+            "KeyFiltering": False, "KeyForgetThreshold": 5, "KeyMergeThreshold": 2,
+            "KeySupport": True, "KeySupportMode": "Auto", "KeySwap": False,
+            "PointerSupport": False, "PointerSupportMode": "ASUS", "TimerResolution": 50000,
+        },
+        "Output": {
+            "ClearScreenOnModeSwitch": False, "ConsoleMode": "",
+            "DirectGopRendering": False, "ForceResolution": False,
+            "GopBurstMode": False, "GopPassThrough": "Disabled",
+            "IgnoreTextInGraphics": False, "InitialMode": "Auto",
+            "ProvideConsoleGop": True, "ReconnectGraphicsOnConnect": False,
+            "ReconnectOnResChange": False, "ReplaceTabWithSpace": False,
+            "Resolution": "Max", "SanitiseClearScreen": False,
+            "TextRenderer": "BuiltinGraphics", "UIScale": -1, "UgaPassThrough": False,
+        },
+        "ProtocolOverrides": {
+            "AppleAudio": False, "AppleBootBeep": False, "AppleDebugLog": False,
+            "AppleEg2Info": False, "AppleFramebufferInfo": False,
+            "AppleImageConversion": False, "AppleImg4Verification": False,
+            "AppleKeyMap": False, "AppleRtcRam": False, "AppleSecureBoot": False,
+            "AppleSmcIo": False, "AppleUserInterfaceTheme": False,
+            "DataHub": False, "DeviceProperties": False, "FirmwareVolume": False,
+            "HashServices": False, "OSInfo": False, "PciIo": False,
+            "UnicodeCollation": False,
+        },
+        "Quirks": {
+            "ActivateHpetSupport": False, "DisableSecurityPolicy": False,
+            "EnableVectorAcceleration": True, "EnableVmx": False,
+            "ExitBootServicesDelay": 0, "ForceOcWriteFlash": False,
+            "ForgeUefiSupport": False, "IgnoreInvalidFlexRatio": False,
+            "ReleaseUsbOwnership": False, "ReloadOptionRoms": False,
+            "RequestBootVarRouting": True, "ResizeGpuBars": -1,
+            "ResizeUserspaceWCBar": -1, "TscSyncTimeout": 0,
+            "UnblockFsConnect": False,
+        },
+        "ReservedMemory": [],
+    },
+}
+
+with open(out_file, "wb") as f:
+    plistlib.dump(config, f, fmt=plistlib.FMT_XML)
+print(f"  ✓ config.plist gerado para {model}")
+print(f"    Kexts carregados: {len(kext_entries)}")
+for e in kext_entries:
+    mn = f" [min:{e['MinKernel']}]" if e['MinKernel'] else ""
+    mx = f" [max:{e['MaxKernel']}]" if e['MaxKernel'] else ""
+    print(f"    - {e['BundlePath']}{mn}{mx}")
+PYEOF
+}
+
+create_offline_installer() {
+    step "Instalador Offline Completo (OpenCore + macOS sem internet)"
+
+    echo -e "  ${BOLD}Modelo do Mac:${NC}"
+    echo ""
+    echo -e "  ${GREEN}[1]${NC}  MacBookPro11,5  ${DIM}(MBP 2015 15\" dGPU AMD R9 M370X)${NC}"
+    echo -e "  ${GREEN}[2]${NC}  MacBookPro11,4  ${DIM}(MBP 2015 15\" so iGPU Intel Iris)${NC}"
+    echo -e "  ${GREEN}[3]${NC}  MacBookPro12,1  ${DIM}(MBP 2015 13\")${NC}"
+    echo -e "  ${GREEN}[4]${NC}  Outro (digitar)${NC}"
+    echo ""
+    echo -e "  Escolha [1-4] (padrao: 1):"
+    read -r model_choice
+    case "$model_choice" in
+        2) SMBIOS_MODEL="MacBookPro11,4" ;;
+        3) SMBIOS_MODEL="MacBookPro12,1" ;;
+        4) echo -e "  Modelo (ex: MacBookPro11,5):"; read -r SMBIOS_MODEL ;;
+        *) SMBIOS_MODEL="MacBookPro11,5" ;;
+    esac
+    info "Modelo SMBIOS: $SMBIOS_MODEL"
+
+    step "Selecionar imagem do instalador"
+    echo -e "  ${BOLD}Fonte:${NC}"
+    echo ""
+    echo -e "  ${GREEN}[1]${NC}  Usar arquivo .hfs existente"
+    echo -e "  ${GREEN}[2]${NC}  Usar InstallAssistant.pkg (extrai e converte)"
+    echo -e "  ${GREEN}[3]${NC}  Navegar e selecionar arquivo"
+    echo ""
+    echo -e "  Escolha [1-3]:"
+    read -r img_src
+
+    INSTALLER_HFS=""
+    case "$img_src" in
+        1)
+            mapfile -t hfs_files < <(find "$(pwd)" -maxdepth 4 -name "*.hfs" -type f 2>/dev/null | sort)
+            if [ ${#hfs_files[@]} -eq 0 ]; then
+                error "Nenhum .hfs encontrado abaixo de $(pwd)"
+            fi
+            echo ""
+            echo -e "  ${BOLD}Arquivos .hfs encontrados:${NC}"
+            for i in "${!hfs_files[@]}"; do
+                echo -e "  ${GREEN}[$((i+1))]${NC}  ${hfs_files[$i]}  ${DIM}($(du -h "${hfs_files[$i]}" | cut -f1))${NC}"
+            done
+            echo ""
+            echo -e "  Escolha:"
+            read -r hfs_ch
+            INSTALLER_HFS="${hfs_files[$((hfs_ch - 1))]}"
+            ;;
+        2)
+            local pkg_file
+            pkg_file=$(find "$(pwd)" -maxdepth 3 -name "InstallAssistant.pkg" -type f 2>/dev/null | head -1)
+            [ -z "$pkg_file" ] && error "InstallAssistant.pkg nao encontrado em $(pwd)"
+            info "Extraindo SharedSupport.dmg de $(basename "$pkg_file")..."
+            mkdir -p "$WORK_DIR/pkg_ex"
+            7z x "$pkg_file" -o"$WORK_DIR/pkg_ex" -y > /dev/null 2>&1 || true
+            local shared_dmg
+            shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" -type f | head -1)
+            if [ -z "$shared_dmg" ]; then
+                bsdtar -xf "$pkg_file" -C "$WORK_DIR/pkg_ex" 2>/dev/null || true
+                shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" | head -1)
+            fi
+            [ -z "$shared_dmg" ] && error "Nao foi possivel extrair SharedSupport.dmg"
+            info "Convertendo para HFS... (pode demorar)"
+            dmg2img "$shared_dmg" "$WORK_DIR/installer.hfs" 2>&1 || error "Falha na conversao dmg2img"
+            INSTALLER_HFS="$WORK_DIR/installer.hfs"
+            ;;
+        3)
+            step "Selecionar arquivo do instalador"
+            if browse_files "$(pwd)"; then
+                INSTALLER_HFS="$SELECTED_FILE"
+            else
+                error "Nenhum arquivo selecionado."
+            fi
+            ;;
+        *)
+            error "Opcao invalida"
+            ;;
+    esac
+
+    [ -f "$INSTALLER_HFS" ] || error "Arquivo do instalador nao encontrado: ${INSTALLER_HFS:-vazio}"
+    info "Instalador: $INSTALLER_HFS ($(du -h "$INSTALLER_HFS" | cut -f1))"
+
+    step "Selecionar pendrive"
+    select_usb
+
+    step "Particionando pendrive"
+    info "Desmontando $TARGET_DEV..."
+    for part in "${TARGET_DEV}"*; do
+        umount "$part" 2>/dev/null || true
+    done
+
+    sgdisk --zap-all "$TARGET_DEV" 2>&1 || true
+    sgdisk --clear   "$TARGET_DEV" 2>&1 || error "Falha ao criar GPT"
+    sgdisk --new=1:0:+300M -t 1:ef00 -c 1:"EFI"          "$TARGET_DEV" 2>&1 || error "Falha ao criar EFI"
+    sgdisk --new=2:0:0     -t 2:af00 -c 2:"macOSInstaller" "$TARGET_DEV" 2>&1 || error "Falha ao criar particao"
+    sgdisk -p "$TARGET_DEV" 2>&1
+
+    sleep 2; partprobe "$TARGET_DEV" 2>/dev/null || true; sleep 1
+
+    local p1="${TARGET_DEV}1" p2="${TARGET_DEV}2"
+    [ -b "$p1" ] || { p1="${TARGET_DEV}p1"; p2="${TARGET_DEV}p2"; }
+    [ -b "$p1" ] || error "Particao EFI nao encontrada"
+    [ -b "$p2" ] || error "Particao do instalador nao encontrada"
+
+    info "Formatando $p1 como FAT32 (EFI)..."
+    mkfs.vfat -F 32 -n "EFI" "$p1" 2>&1
+
+    step "Gravando instalador no pendrive"
+    info "Gravando $(basename "$INSTALLER_HFS") → $p2"
+    info "Isso pode demorar varios minutos..."
+    dd if="$INSTALLER_HFS" of="$p2" bs=4M status=progress conv=fsync 2>&1 \
+        || error "Falha ao gravar imagem do instalador"
+
+    step "Configurando OpenCore na EFI"
+    EFI_MOUNT="$WORK_DIR/efi_offline"
+    mkdir -p "$EFI_MOUNT"
+    mount "$p1" "$EFI_MOUNT"
+
+    build_opencore_efi "$EFI_MOUNT/EFI"
+    generate_config_plist "$SMBIOS_MODEL" "$EFI_MOUNT/EFI/OC/Kexts" "$EFI_MOUNT/EFI/OC/config.plist"
+
+    info "Estrutura EFI final:"
+    find "$EFI_MOUNT" -type f 2>/dev/null | sed "s|$EFI_MOUNT/||" | sort
+
+    umount "$EFI_MOUNT" 2>/dev/null || true
+    sync
+    info "Sincronizado."
+
+    step "CONCLUIDO!"
+    echo ""
+    info "USB com instalador offline do macOS + OpenCore pronto!"
+    echo ""
+    info "${BOLD}Como usar:${NC}"
+    info "  1. Conecte o USB no Mac"
+    info "  2. Ligue segurando Option/Alt"
+    info "  3. Selecione 'EFI Boot' ou 'OpenCore'"
+    info "  4. No picker do OpenCore: selecione o instalador do macOS"
+    info "  5. Instale o macOS normalmente (SEM internet)"
+    info "  6. Apos reiniciar no macOS instalado: baixe o OCLP e aplique patches"
+    echo ""
+    warn "IMPORTANTE: apos a instalacao, rode o OpenCore Legacy Patcher"
+    warn "para ativar GPU, WiFi e outros recursos do $SMBIOS_MODEL"
+    warn "OCLP: https://github.com/dortania/OpenCore-Legacy-Patcher/releases"
+}
+
+# ══════════════════════════════════════════════
 # Menu principal
 # ══════════════════════════════════════════════
 
@@ -517,8 +964,9 @@ main() {
 
         echo -e "  ${GREEN}[1]${NC}  ${BOLD}Baixar da Apple${NC}  ${DIM}(BaseSystem via macrecovery)${NC}"
         echo -e "  ${GREEN}[2]${NC}  ${BOLD}Usar arquivo local${NC}  ${DIM}(.pkg / .dmg / .iso / .img)${NC}"
+        echo -e "  ${GREEN}[3]${NC}  ${BOLD}Instalador offline completo${NC}  ${DIM}(OpenCore + instalador sem internet — MBP 2013-2015)${NC}"
         echo ""
-        echo -e "  Escolha [1-2]:"
+        echo -e "  Escolha [1-3]:"
         read -r source_choice
 
         case "$source_choice" in
@@ -534,6 +982,10 @@ main() {
                 else
                     error "Nenhum arquivo selecionado."
                 fi
+                ;;
+            3)
+                create_offline_installer
+                exit 0
                 ;;
             *)
                 error "Opcao invalida"
