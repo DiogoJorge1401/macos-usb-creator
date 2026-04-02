@@ -825,7 +825,13 @@ create_offline_installer() {
     INSTALLER_HFS=""
     case "$img_src" in
         1)
-            mapfile -t hfs_files < <(find "$(pwd)" -maxdepth 4 -name "*.hfs" -type f 2>/dev/null | sort)
+            # Busca no diretorio atual, no diretorio pai e no home do usuario
+            local search_roots=("$(pwd)" "$(dirname "$(pwd)")" "/home" "/root" "/tmp")
+            mapfile -t hfs_files < <(
+                for r in "${search_roots[@]}"; do
+                    find "$r" -maxdepth 5 -name "*.hfs" -type f 2>/dev/null
+                done | sort -u
+            )
             if [ ${#hfs_files[@]} -eq 0 ]; then
                 error "Nenhum .hfs encontrado abaixo de $(pwd)"
             fi
