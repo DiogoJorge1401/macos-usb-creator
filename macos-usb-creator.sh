@@ -417,10 +417,16 @@ flash_usb() {
 
     if [ "$IS_RECOVERY" = true ]; then
         # Metodo OpenCore: GPT com 2 particoes
-        info "Criando tabela GPT (EFI + Recovery)..."
-        sgdisk --zap-all "$TARGET_DEV" 2>&1
-        sgdisk --new=1:0:+200M -t 1:0700 "$TARGET_DEV" 2>&1
-        sgdisk --new=2:0:0 -t 2:af00 "$TARGET_DEV" 2>&1
+        info "Limpando tabela de particoes..."
+        sgdisk --zap-all "$TARGET_DEV" 2>&1 || true
+        # Recriar GPT limpa apos o zap
+        info "Criando nova tabela GPT..."
+        sgdisk --clear "$TARGET_DEV" 2>&1 || error "Falha ao criar tabela GPT"
+        info "Criando particoes (EFI + Recovery)..."
+        sgdisk --new=1:0:+200M -t 1:0700 "$TARGET_DEV" 2>&1 || error "Falha ao criar particao EFI"
+        sgdisk --new=2:0:0 -t 2:af00 "$TARGET_DEV" 2>&1 || error "Falha ao criar particao Recovery"
+        info "Tabela de particoes:"
+        sgdisk -p "$TARGET_DEV" 2>&1
 
         sleep 2
         partprobe "$TARGET_DEV" 2>/dev/null || true
