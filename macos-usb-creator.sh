@@ -453,14 +453,15 @@ flash_usb() {
         dmg2img -p 0 "$DMG_FILE" "$p2" 2>&1 || \
         error "Falha ao gravar com dmg2img"
 
-        # Copiar recovery na particao EFI
-        info "Copiando arquivos de recovery na EFI..."
+        # Copiar apenas o chunklist na EFI (o DMG ja foi gravado na particao 2)
+        # O BaseSystem.dmg e muito grande (~753MB) para a EFI (200MB)
+        info "Configurando particao EFI..."
         EFI_MOUNT="$WORK_DIR/efi_mount"
         mkdir -p "$EFI_MOUNT"
         mount "$p1" "$EFI_MOUNT"
         mkdir -p "$EFI_MOUNT/com.apple.recovery.boot"
-        cp "$DMG_FILE" "$EFI_MOUNT/com.apple.recovery.boot/" 2>/dev/null || true
         [ -f "$CHUNKLIST" ] && cp "$CHUNKLIST" "$EFI_MOUNT/com.apple.recovery.boot/" 2>/dev/null || true
+        info "Particao EFI pronta (copie seu OpenCore EFI aqui depois)"
         info "Conteudo da EFI:"
         find "$EFI_MOUNT" -type f 2>/dev/null || true
         umount "$EFI_MOUNT" 2>/dev/null || true
