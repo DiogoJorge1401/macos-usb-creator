@@ -508,24 +508,25 @@ for a in r.get('assets',[]):
 }
 
 oc_download_cache() {
+    # Usa variavel global _OC_CACHE para evitar poluir stdout com mensagens [INFO]
     local url="$1"
     local fname; fname=$(basename "$url")
-    local cache="$WORK_DIR/oc_cache/$fname"
+    _OC_CACHE="$WORK_DIR/oc_cache/$fname"
     mkdir -p "$WORK_DIR/oc_cache"
-    if [ ! -f "$cache" ]; then
+    if [ ! -f "$_OC_CACHE" ]; then
         info "Baixando $fname..."
-        curl -L --progress-bar -o "$cache" "$url" || error "Falha ao baixar $url"
+        curl -L --progress-bar -o "$_OC_CACHE" "$url" || error "Falha ao baixar $url"
     else
         info "$fname (cache)"
     fi
-    echo "$cache"
 }
 
 oc_fetch_kexts() {
     local repo="$1" pattern="$2" dest_kexts="$3"
     local url; url=$(oc_get_asset_url "$repo" "$pattern")
     [ -z "$url" ] && { warn "Nao encontrou '$pattern' em $repo"; return 0; }
-    local cache; cache=$(oc_download_cache "$url")
+    oc_download_cache "$url"
+    local cache="$_OC_CACHE"
     local extract_dir="$WORK_DIR/oc_extract/$(echo "$repo" | tr '/' '_')"
     rm -rf "$extract_dir"; mkdir -p "$extract_dir"
     7z x "$cache" -o"$extract_dir" -y > /dev/null 2>&1 || true
@@ -549,7 +550,8 @@ build_opencore_efi() {
     info "Baixando OpenCorePkg..."
     local oc_url; oc_url=$(oc_get_asset_url "acidanthera/OpenCorePkg" "RELEASE.zip")
     [ -z "$oc_url" ] && error "Nao encontrou OpenCorePkg RELEASE.zip"
-    local oc_cache; oc_cache=$(oc_download_cache "$oc_url")
+    oc_download_cache "$oc_url"
+    local oc_cache="$_OC_CACHE"
     local oc_ex="$WORK_DIR/oc_extract/OpenCorePkg"
     rm -rf "$oc_ex"; mkdir -p "$oc_ex"
     7z x "$oc_cache" -o"$oc_ex" -y > /dev/null 2>&1 || true
