@@ -16,7 +16,7 @@ set -e
 
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${MACOS_USB_WORKDIR:-/tmp/macos_usb_creator}"
+WORK_DIR="${MACOS_USB_WORKDIR:-/var/tmp/macos_usb_creator}"
 
 # Source all lib files in dependency order
 source "$SCRIPT_DIR/lib/common.sh"

@@ -9,11 +9,12 @@ kext_order = [
     "Lilu", "WhateverGreen", "VirtualSMC",
     "SMCBatteryManager", "SMCLightSensor", "SMCProcessor", "SMCSuperIO",
     "AirportBrcmFixup",
-    "BrcmFirmwareData", "BrcmPatchRAM3", "BrcmBluetoothInjector",
+    "BlueToolFixup", "BrcmFirmwareData", "BrcmPatchRAM3", "BrcmBluetoothInjector",
     "RestrictEvents", "CryptexFixup",
 ]
 
 min_max = {
+    "BlueToolFixup":         ("21.0.0", ""),
     "BrcmBluetoothInjector": ("", "20.99.99"),
     "CryptexFixup":          ("23.0.0", ""),
 }
