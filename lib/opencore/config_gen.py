@@ -110,10 +110,10 @@ config = {
         "Add": {
             "4D1EDE05-38C7-4A6A-9CC6-4BCCA8B38C14": {
                 "DefaultBackgroundColor": bytes.fromhex("00000000"),
-                "UIScale": bytes([1]),
+                "UIScale": bytes([2]),
             },
             "7C436110-AB2A-4BBB-A880-FE41995C9F82": {
-                "boot-args": "-v keepsyms=1 amfi_get_out_of_my_way=0x01 brcmfx-driver=2 revpatch=sbvmm,asset -wegnoegpu igfxonln=1",
+                "boot-args": "-v keepsyms=1 amfi_get_out_of_my_way=0x01 brcmfx-driver=2 revpatch=sbvmm,asset -wegnoegpu",
                 "csr-active-config": bytes.fromhex("03080000"),
                 "prev-lang:kbd": "en-US:0",
                 "run-efi-updater": "No",
@@ -159,10 +159,10 @@ config = {
         },
         "Output": {
             "ClearScreenOnModeSwitch": False, "ConsoleMode": "",
-            "DirectGopRendering": True, "ForceResolution": False,
+            "DirectGopRendering": False, "ForceResolution": False,
             "GopBurstMode": False, "GopPassThrough": "Apple",
             "IgnoreTextInGraphics": False, "InitialMode": "Auto",
-            "ProvideConsoleGop": True, "ReconnectGraphicsOnConnect": True,
+            "ProvideConsoleGop": True, "ReconnectGraphicsOnConnect": False,
             "ReconnectOnResChange": False, "ReplaceTabWithSpace": False,
             "Resolution": "Max", "SanitiseClearScreen": False,
             "TextRenderer": "BuiltinGraphics", "UIScale": 2, "UgaPassThrough": False,
