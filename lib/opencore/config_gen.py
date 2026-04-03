@@ -88,13 +88,13 @@ config = {
             "LauncherPath": "Default", "PickerAttributes": 17,
             "PickerAudioAssist": False, "PickerMode": "Builtin",
             "PickerVariant": "Auto", "PollAppleHotKeys": True,
-            "ShowPicker": True, "TakeoffDelay": 0, "Timeout": 5,
+            "ShowPicker": True, "TakeoffDelay": 0, "Timeout": 30,
         },
         "Debug": {
-            "AppleDebug": False, "ApplePanic": False,
+            "AppleDebug": True, "ApplePanic": True,
             "DisableWatchDog": True, "DisplayDelay": 0,
             "DisplayLevel": 2147483650, "LogModules": "*",
-            "SerialInit": False, "SysReport": False, "Target": 3,
+            "SerialInit": False, "SysReport": False, "Target": 67,
         },
         "Security": {
             "AllowSetDefault": True, "ApECID": 0, "AuthRestart": False,

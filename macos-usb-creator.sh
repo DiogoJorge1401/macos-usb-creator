@@ -67,6 +67,23 @@ main() {
             1)
                 IS_RECOVERY=true
                 download_recovery
+
+                # Perguntar modelo SMBIOS para OpenCore (kexts WiFi/BT)
+                echo ""
+                echo -e "  ${BOLD}Modelo do Mac (para kexts OpenCore):${NC}"
+                echo -e "  ${GREEN}[1]${NC}  MacBookPro11,5  ${DIM}(MBP 2015 15\" dGPU)${NC}"
+                echo -e "  ${GREEN}[2]${NC}  MacBookPro11,4  ${DIM}(MBP 2015 15\" iGPU)${NC}"
+                echo -e "  ${GREEN}[3]${NC}  MacBookPro12,1  ${DIM}(MBP 2015 13\")${NC}"
+                echo -e "  ${GREEN}[4]${NC}  Outro (digitar)"
+                echo -e "  Escolha [1-4] (padrao: 1):"
+                read -r _m
+                case "$_m" in
+                    2) SMBIOS_MODEL="MacBookPro11,4" ;;
+                    3) SMBIOS_MODEL="MacBookPro12,1" ;;
+                    4) echo -e "  Modelo:"; read -r SMBIOS_MODEL ;;
+                    *) SMBIOS_MODEL="MacBookPro11,5" ;;
+                esac
+                info "Modelo: $SMBIOS_MODEL"
                 ;;
             2)
                 IS_RECOVERY=false
@@ -98,6 +115,19 @@ main() {
 
     flash_usb
 
+    # Para recovery: adicionar OpenCore EFI com kexts (WiFi, BT, SMC)
+    if [ "$IS_RECOVERY" = true ] && [ -n "$SMBIOS_MODEL" ]; then
+        step "Adicionando OpenCore EFI (kexts para WiFi/Bluetooth)"
+        local _p1="${TARGET_DEV}1"
+        [ -b "${TARGET_DEV}p1" ] && _p1="${TARGET_DEV}p1"
+        EFI_MOUNT="$WORK_DIR/efi_recovery"
+        mkdir -p "$EFI_MOUNT"
+        mount "$_p1" "$EFI_MOUNT"
+        build_opencore_efi "$EFI_MOUNT/EFI"
+        generate_config_plist "$SMBIOS_MODEL" "$EFI_MOUNT/EFI/OC/Kexts" "$EFI_MOUNT/EFI/OC/config.plist"
+        umount "$EFI_MOUNT" 2>/dev/null || true
+    fi
+
     step "CONCLUIDO!"
 
     echo ""
@@ -107,8 +137,11 @@ main() {
         info "Para bootar no Mac:"
         info "  1. Conecte o USB no Mac"
         info "  2. Ligue segurando Option/Alt"
-        info "  3. Selecione o disco de recovery"
-        info "  4. O Mac baixara o restante pela internet"
+        info "  3. Selecione ${BOLD}EFI Boot${NC} (OpenCore — para ter WiFi)"
+        info "  4. No picker: selecione a recovery do macOS"
+        info "  5. Conecte ao WiFi e clique em Reinstalar macOS"
+        warn "  APOS instalar: baixe OCLP para ativar GPU/WiFi permanentemente"
+        warn "  OCLP: https://github.com/dortania/OpenCore-Legacy-Patcher/releases"
     else
         info "Imagem gravada no USB com sucesso!"
         echo ""
