@@ -705,7 +705,7 @@ config = {
                 "UIScale": bytes([1]),
             },
             "7C436110-AB2A-4BBB-A880-FE41995C9F82": {
-                "boot-args": "-v keepsyms=1 amfi_get_out_of_my_way=0x01 brcmfx-driver=2 revpatch=sbvmm,asset",
+                "boot-args": "-v keepsyms=1 amfi_get_out_of_my_way=0x01 brcmfx-driver=2 revpatch=sbvmm,asset -wegnoegpu igfxonln=1",
                 "csr-active-config": bytes.fromhex("03080000"),
                 "prev-lang:kbd": "en-US:0",
                 "run-efi-updater": "No",
