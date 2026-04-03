@@ -158,13 +158,13 @@ config = {
         },
         "Output": {
             "ClearScreenOnModeSwitch": False, "ConsoleMode": "",
-            "DirectGopRendering": False, "ForceResolution": False,
-            "GopBurstMode": False, "GopPassThrough": "Disabled",
+            "DirectGopRendering": True, "ForceResolution": False,
+            "GopBurstMode": False, "GopPassThrough": "Apple",
             "IgnoreTextInGraphics": False, "InitialMode": "Auto",
-            "ProvideConsoleGop": True, "ReconnectGraphicsOnConnect": False,
+            "ProvideConsoleGop": True, "ReconnectGraphicsOnConnect": True,
             "ReconnectOnResChange": False, "ReplaceTabWithSpace": False,
             "Resolution": "Max", "SanitiseClearScreen": False,
-            "TextRenderer": "BuiltinGraphics", "UIScale": -1, "UgaPassThrough": False,
+            "TextRenderer": "BuiltinGraphics", "UIScale": 2, "UgaPassThrough": False,
         },
         "ProtocolOverrides": {
             "AppleAudio": False, "AppleBootBeep": False, "AppleDebugLog": False,
