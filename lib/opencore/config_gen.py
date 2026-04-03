@@ -162,7 +162,7 @@ config = {
             "DirectGopRendering": False, "ForceResolution": False,
             "GopBurstMode": False, "GopPassThrough": "Apple",
             "IgnoreTextInGraphics": False, "InitialMode": "Auto",
-            "ProvideConsoleGop": True, "ReconnectGraphicsOnConnect": False,
+            "ProvideConsoleGop": False, "ReconnectGraphicsOnConnect": False,
             "ReconnectOnResChange": False, "ReplaceTabWithSpace": False,
             "Resolution": "Max", "SanitiseClearScreen": False,
             "TextRenderer": "BuiltinGraphics", "UIScale": 2, "UgaPassThrough": False,
