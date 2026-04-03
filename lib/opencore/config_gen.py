@@ -86,9 +86,9 @@ config = {
             "ConsoleAttributes": 0, "HibernateMode": "None",
             "HideAuxiliary": False, "LauncherOption": "Disabled",
             "LauncherPath": "Default", "PickerAttributes": 17,
-            "PickerAudioAssist": False, "PickerMode": "Apple",
+            "PickerAudioAssist": False, "PickerMode": "Builtin",
             "PickerVariant": "Auto", "PollAppleHotKeys": True,
-            "ShowPicker": True, "TakeoffDelay": 0, "Timeout": 30,
+            "ShowPicker": False, "TakeoffDelay": 0, "Timeout": 0,
         },
         "Debug": {
             "AppleDebug": True, "ApplePanic": True,
