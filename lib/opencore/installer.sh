@@ -23,16 +23,55 @@ create_offline_installer() {
     step "Selecionar imagem do instalador"
     echo -e "  ${BOLD}Fonte:${NC}"
     echo ""
-    echo -e "  ${GREEN}[1]${NC}  Usar arquivo .hfs existente"
-    echo -e "  ${GREEN}[2]${NC}  Usar InstallAssistant.pkg (extrai e converte)"
-    echo -e "  ${GREEN}[3]${NC}  Navegar e selecionar arquivo"
+    echo -e "  ${GREEN}[1]${NC}  ${BOLD}Baixar da Apple via gibMacOS${NC}  ${DIM}(~13 GB — recomendado se nao tem o instalador)${NC}"
+    echo -e "  ${GREEN}[2]${NC}  Usar arquivo .hfs existente"
+    echo -e "  ${GREEN}[3]${NC}  Usar InstallAssistant.pkg local (extrai e converte)"
+    echo -e "  ${GREEN}[4]${NC}  Navegar e selecionar arquivo"
     echo ""
-    echo -e "  Escolha [1-3]:"
+    echo -e "  Escolha [1-4]:"
     read -r img_src
 
     INSTALLER_HFS=""
     case "$img_src" in
         1)
+            echo ""
+            echo -e "  ${BOLD}Versao do macOS:${NC}"
+            echo ""
+            echo -e "  ${GREEN}[1]${NC}  macOS Sonoma (14)    ${DIM}— recomendado para MBP 2013-2015${NC}"
+            echo -e "  ${GREEN}[2]${NC}  macOS Sequoia (15)   ${DIM}— mais recente, suporte OCLP pode variar${NC}"
+            echo -e "  ${GREEN}[3]${NC}  macOS Ventura (13)   ${DIM}— opcao mais estavel para hardware antigo${NC}"
+            echo -e "  ${GREEN}[4]${NC}  Outra (modo interativo)${NC}"
+            echo ""
+            echo -e "  Escolha [1-4] (padrao: 1):"
+            read -r ver_choice
+            local macos_ver
+            case "$ver_choice" in
+                2) macos_ver="Sequoia" ;;
+                3) macos_ver="Ventura" ;;
+                4) macos_ver="" ;;
+                *) macos_ver="Sonoma" ;;
+            esac
+            if [ -n "$macos_ver" ]; then
+                gibmacos_download_and_convert "$macos_ver"
+            else
+                gibmacos_download "" "$WORK_DIR"
+                # Converter o pkg baixado
+                info "Extraindo SharedSupport.dmg de InstallAssistant.pkg..."
+                mkdir -p "$WORK_DIR/pkg_ex"
+                7z x "$GIBMACOS_PKG" -o"$WORK_DIR/pkg_ex" -y > /dev/null 2>&1 || true
+                local shared_dmg
+                shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" -type f | head -1)
+                if [ -z "$shared_dmg" ]; then
+                    bsdtar -xf "$GIBMACOS_PKG" -C "$WORK_DIR/pkg_ex" 2>/dev/null || true
+                    shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" | head -1)
+                fi
+                [ -z "$shared_dmg" ] && error "Nao foi possivel extrair SharedSupport.dmg"
+                info "Convertendo para HFS... (pode demorar)"
+                dmg2img "$shared_dmg" "$WORK_DIR/installer.hfs" 2>&1 || error "Falha na conversao dmg2img"
+                INSTALLER_HFS="$WORK_DIR/installer.hfs"
+            fi
+            ;;
+        2)
             # Busca no diretorio atual, no diretorio pai e no home do usuario
             local search_roots=("$(pwd)" "$(dirname "$(pwd)")" "/home" "/root" "/tmp")
             mapfile -t hfs_files < <(
@@ -53,7 +92,7 @@ create_offline_installer() {
             read -r hfs_ch
             INSTALLER_HFS="${hfs_files[$((hfs_ch - 1))]}"
             ;;
-        2)
+        3)
             local pkg_file
             pkg_file=$(find "$(pwd)" -maxdepth 3 -name "InstallAssistant.pkg" -type f 2>/dev/null | head -1)
             [ -z "$pkg_file" ] && error "InstallAssistant.pkg nao encontrado em $(pwd)"
@@ -71,7 +110,7 @@ create_offline_installer() {
             dmg2img "$shared_dmg" "$WORK_DIR/installer.hfs" 2>&1 || error "Falha na conversao dmg2img"
             INSTALLER_HFS="$WORK_DIR/installer.hfs"
             ;;
-        3)
+        4)
             step "Selecionar arquivo do instalador"
             if browse_files "$(pwd)"; then
                 INSTALLER_HFS="$SELECTED_FILE"
@@ -126,6 +165,10 @@ create_offline_installer() {
     build_opencore_efi "$EFI_MOUNT/EFI"
     generate_config_plist "$SMBIOS_MODEL" "$EFI_MOUNT/EFI/OC/Kexts" "$EFI_MOUNT/EFI/OC/config.plist"
 
+    step "Incluindo ferramentas extras no pendrive"
+    oc_download_oclp "$EFI_MOUNT"
+    oc_copy_skip_setup "$EFI_MOUNT"
+
     info "Estrutura EFI final:"
     find "$EFI_MOUNT" -type f 2>/dev/null | sed "s|$EFI_MOUNT/||" | sort
 
@@ -135,17 +178,34 @@ create_offline_installer() {
 
     step "CONCLUIDO!"
     echo ""
-    info "USB com instalador offline do macOS + OpenCore pronto!"
+    info "USB com instalador offline do macOS + OpenCore + OCLP pronto!"
     echo ""
     info "${BOLD}Como usar:${NC}"
+    info ""
+    info "  ${BOLD}INSTALACAO:${NC}"
     info "  1. Conecte o USB no Mac"
     info "  2. Ligue segurando Option/Alt"
     info "  3. Selecione 'EFI Boot' ou 'OpenCore'"
     info "  4. No picker do OpenCore: selecione o instalador do macOS"
-    info "  5. Instale o macOS normalmente (SEM internet)"
-    info "  6. Apos reiniciar no macOS instalado: baixe o OCLP e aplique patches"
+    info "  5. Abra o Disk Utility → formate o SSD como APFS + GUID"
+    info "  6. Instale o macOS normalmente (SEM internet)"
+    info ""
+    info "  ${BOLD}PULAR SETUP ASSISTANT (sem WiFi):${NC}"
+    info "  7. Quando o Mac reiniciar apos instalar, boot pelo USB de novo"
+    info "  8. No picker: selecione 'macOS Base System' ou 'Recovery'"
+    info "  9. No menu: Utilitarios → Terminal"
+    info "  10. Execute:"
+    info "      ${CYAN}diskutil mount /dev/disk0s1${NC}"
+    info "      ${CYAN}bash /Volumes/EFI/skip-setup.sh${NC}"
+    info "  11. Defina seu nome de usuario e senha"
+    info "  12. Reinicie → o macOS vai direto para o login!"
+    info ""
+    info "  ${BOLD}ATIVAR WIFI/GPU (pos-instalacao):${NC}"
+    info "  13. No Mac, abra o Terminal:"
+    info "      ${CYAN}sudo diskutil mount /dev/disk2s1${NC}"
+    info "      ${CYAN}cp /Volumes/EFI/OCLP/*.pkg ~/Desktop/${NC}"
+    info "  14. Instale o OCLP → Post-Install Root Patch → Reinicie"
     echo ""
-    warn "IMPORTANTE: apos a instalacao, rode o OpenCore Legacy Patcher"
-    warn "para ativar GPU, WiFi e outros recursos do $SMBIOS_MODEL"
-    warn "OCLP: https://github.com/dortania/OpenCore-Legacy-Patcher/releases"
+    warn "TUDO esta no pendrive: OpenCore, OCLP e skip-setup!"
+    warn "Nenhuma conexao com internet necessaria em momento algum."
 }

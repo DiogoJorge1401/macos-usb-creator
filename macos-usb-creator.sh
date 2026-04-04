@@ -24,6 +24,7 @@ source "$SCRIPT_DIR/lib/deps.sh"
 source "$SCRIPT_DIR/lib/local_file.sh"
 source "$SCRIPT_DIR/lib/recovery.sh"
 source "$SCRIPT_DIR/lib/usb.sh"
+source "$SCRIPT_DIR/lib/gibmacos.sh"
 source "$SCRIPT_DIR/lib/opencore/efi_builder.sh"
 source "$SCRIPT_DIR/lib/opencore/installer.sh"
 

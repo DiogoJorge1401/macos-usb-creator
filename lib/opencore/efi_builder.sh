@@ -84,6 +84,7 @@ build_opencore_efi() {
     oc_fetch_kexts "acidanthera/Lilu"             "RELEASE.zip" "$kdir"
     oc_fetch_kexts "acidanthera/WhateverGreen"    "RELEASE.zip" "$kdir"
     oc_fetch_kexts "acidanthera/VirtualSMC"       "RELEASE.zip" "$kdir"
+    oc_fetch_kexts "acidanthera/AppleALC"         "RELEASE.zip" "$kdir"
     oc_fetch_kexts "acidanthera/AirportBrcmFixup" "RELEASE.zip" "$kdir"
     oc_fetch_kexts "acidanthera/BrcmPatchRAM"     "RELEASE.zip" "$kdir"
     oc_fetch_kexts "acidanthera/RestrictEvents"   "RELEASE.zip" "$kdir"
@@ -91,6 +92,38 @@ build_opencore_efi() {
 
     info "Kexts instalados:"
     ls "$kdir/" 2>/dev/null || true
+}
+
+oc_download_oclp() {
+    local dest="$1"
+    info "Baixando OpenCore Legacy Patcher..."
+    # OCLP 2.3.0+ so disponibiliza .pkg; versoes anteriores tinham GUI.app.zip
+    local url; url=$(oc_get_asset_url "dortania/OpenCore-Legacy-Patcher" "OpenCore-Patcher.pkg")
+    if [ -z "$url" ]; then
+        url=$(oc_get_asset_url "dortania/OpenCore-Legacy-Patcher" "GUI.app.zip")
+    fi
+    if [ -z "$url" ]; then
+        warn "Nao foi possivel encontrar OCLP para download"
+        return 0
+    fi
+    oc_download_cache "$url"
+    local cache="$_OC_CACHE"
+    mkdir -p "$dest/OCLP"
+    cp "$cache" "$dest/OCLP/"
+    info "  ✓ OCLP salvo em OCLP/$(basename "$cache")"
+    info "    Apos instalar o macOS, copie e execute o OCLP para ativar WiFi/GPU"
+}
+
+oc_copy_skip_setup() {
+    local dest="$1"
+    local script_src="$SCRIPT_DIR/resources/skip-setup.sh"
+    if [ -f "$script_src" ]; then
+        cp "$script_src" "$dest/skip-setup.sh"
+        chmod +x "$dest/skip-setup.sh"
+        info "  ✓ skip-setup.sh copiado para a raiz do EFI"
+    else
+        warn "skip-setup.sh nao encontrado em resources/"
+    fi
 }
 
 generate_config_plist() {
