@@ -51,17 +51,16 @@ process_pkg() {
         done
     fi
 
-    # Fallback: tentar 7z
-    if command -v 7z &>/dev/null; then
-        info "Tentando extrair com 7z..."
-        7z x "$pkg_file" -o"$WORK_DIR/pkg_extracted" 2>/dev/null || true
+    # Fallback: tentar bsdtar sem filtro
+    info "Tentando extrair tudo com bsdtar..."
+    mkdir -p "$WORK_DIR/pkg_extracted"
+    bsdtar -xf "$pkg_file" -C "$WORK_DIR/pkg_extracted" 2>/dev/null || true
 
-        local found
-        found=$(find "$WORK_DIR/pkg_extracted" -name "*.dmg" -type f 2>/dev/null | head -1)
-        if [ -n "$found" ]; then
-            DMG_FILE="$found"
-            return 0
-        fi
+    local found
+    found=$(find "$WORK_DIR/pkg_extracted" -name "*.dmg" -type f 2>/dev/null | head -1)
+    if [ -n "$found" ]; then
+        DMG_FILE="$found"
+        return 0
     fi
 
     error "Nao foi possivel extrair .dmg do .pkg"

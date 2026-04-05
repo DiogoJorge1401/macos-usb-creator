@@ -7,7 +7,7 @@ check_root() {
 install_deps() {
     local missing=()
 
-    for cmd in python3 git dmg2img sgdisk mkfs.vfat bsdtar; do
+    for cmd in python3 git dmg2img sgdisk mkfs.vfat mkfs.hfsplus bsdtar; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
 
@@ -16,7 +16,7 @@ install_deps() {
     warn "Faltando: ${missing[*]}"
 
     if command -v pacman &>/dev/null; then
-        pacman -S --needed --noconfirm python git gptfdisk dosfstools libarchive 2>/dev/null || true
+        pacman -S --needed --noconfirm python git gptfdisk dosfstools libarchive hfsprogs 2>/dev/null || true
         if ! command -v dmg2img &>/dev/null; then
             local real_user; real_user=$(logname 2>/dev/null || echo "$SUDO_USER")
             [ -n "$real_user" ] || error "Nao foi possivel detectar usuario. Instale dmg2img manualmente."
@@ -25,14 +25,14 @@ install_deps() {
                 error "Instale dmg2img manualmente via AUR"
         fi
     elif command -v apt &>/dev/null; then
-        apt install -y python3 git dmg2img gdisk dosfstools libarchive-tools
+        apt install -y python3 git dmg2img gdisk dosfstools libarchive-tools hfsprogs
     elif command -v dnf &>/dev/null; then
-        dnf install -y python3 git dmg2img gdisk dosfstools bsdtar
+        dnf install -y python3 git dmg2img gdisk dosfstools bsdtar hfsplus-tools
     else
         error "Gerenciador de pacotes nao suportado. Instale: ${missing[*]}"
     fi
 
-    for cmd in python3 git dmg2img sgdisk mkfs.vfat; do
+    for cmd in python3 git dmg2img sgdisk mkfs.vfat mkfs.hfsplus bsdtar; do
         command -v "$cmd" &>/dev/null || error "$cmd nao encontrado apos instalacao"
     done
 

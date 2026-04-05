@@ -23,15 +23,17 @@ create_offline_installer() {
     step "Selecionar imagem do instalador"
     echo -e "  ${BOLD}Fonte:${NC}"
     echo ""
-    echo -e "  ${GREEN}[1]${NC}  ${BOLD}Baixar da Apple via gibMacOS${NC}  ${DIM}(~13 GB — recomendado se nao tem o instalador)${NC}"
+    echo -e "  ${GREEN}[1]${NC}  ${BOLD}Baixar direto da Apple${NC}  ${DIM}(~13 GB — recomendado se nao tem o instalador)${NC}"
     echo -e "  ${GREEN}[2]${NC}  Usar arquivo .hfs existente"
     echo -e "  ${GREEN}[3]${NC}  Usar InstallAssistant.pkg local (extrai e converte)"
     echo -e "  ${GREEN}[4]${NC}  Navegar e selecionar arquivo"
+    echo -e "  ${GREEN}[5]${NC}  Usar SharedSupport.dmg ja extraido  ${DIM}(se ja extraiste o .pkg manualmente)${NC}"
     echo ""
-    echo -e "  Escolha [1-4]:"
+    echo -e "  Escolha [1-5]:"
     read -r img_src
 
     INSTALLER_HFS=""
+    INSTALLER_SHARED_DMG=""
     case "$img_src" in
         1)
             echo ""
@@ -40,36 +42,16 @@ create_offline_installer() {
             echo -e "  ${GREEN}[1]${NC}  macOS Sonoma (14)    ${DIM}— recomendado para MBP 2013-2015${NC}"
             echo -e "  ${GREEN}[2]${NC}  macOS Sequoia (15)   ${DIM}— mais recente, suporte OCLP pode variar${NC}"
             echo -e "  ${GREEN}[3]${NC}  macOS Ventura (13)   ${DIM}— opcao mais estavel para hardware antigo${NC}"
-            echo -e "  ${GREEN}[4]${NC}  Outra (modo interativo)${NC}"
             echo ""
-            echo -e "  Escolha [1-4] (padrao: 1):"
+            echo -e "  Escolha [1-3] (padrao: 1):"
             read -r ver_choice
             local macos_ver
             case "$ver_choice" in
                 2) macos_ver="Sequoia" ;;
                 3) macos_ver="Ventura" ;;
-                4) macos_ver="" ;;
                 *) macos_ver="Sonoma" ;;
             esac
-            if [ -n "$macos_ver" ]; then
-                gibmacos_download_and_convert "$macos_ver"
-            else
-                gibmacos_download "" "$WORK_DIR"
-                # Converter o pkg baixado
-                info "Extraindo SharedSupport.dmg de InstallAssistant.pkg..."
-                mkdir -p "$WORK_DIR/pkg_ex"
-                7z x "$GIBMACOS_PKG" -o"$WORK_DIR/pkg_ex" -y > /dev/null 2>&1 || true
-                local shared_dmg
-                shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" -type f | head -1)
-                if [ -z "$shared_dmg" ]; then
-                    bsdtar -xf "$GIBMACOS_PKG" -C "$WORK_DIR/pkg_ex" 2>/dev/null || true
-                    shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" | head -1)
-                fi
-                [ -z "$shared_dmg" ] && error "Nao foi possivel extrair SharedSupport.dmg"
-                info "Convertendo para HFS... (pode demorar)"
-                dmg2img "$shared_dmg" "$WORK_DIR/installer.hfs" 2>&1 || error "Falha na conversao dmg2img"
-                INSTALLER_HFS="$WORK_DIR/installer.hfs"
-            fi
+            apple_download_and_extract "$macos_ver"
             ;;
         2)
             # Busca no diretorio atual, no diretorio pai e no home do usuario
@@ -96,19 +78,7 @@ create_offline_installer() {
             local pkg_file
             pkg_file=$(find "$(pwd)" -maxdepth 3 -name "InstallAssistant.pkg" -type f 2>/dev/null | head -1)
             [ -z "$pkg_file" ] && error "InstallAssistant.pkg nao encontrado em $(pwd)"
-            info "Extraindo SharedSupport.dmg de $(basename "$pkg_file")..."
-            mkdir -p "$WORK_DIR/pkg_ex"
-            7z x "$pkg_file" -o"$WORK_DIR/pkg_ex" -y > /dev/null 2>&1 || true
-            local shared_dmg
-            shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" -type f | head -1)
-            if [ -z "$shared_dmg" ]; then
-                bsdtar -xf "$pkg_file" -C "$WORK_DIR/pkg_ex" 2>/dev/null || true
-                shared_dmg=$(find "$WORK_DIR/pkg_ex" -name "SharedSupport.dmg" | head -1)
-            fi
-            [ -z "$shared_dmg" ] && error "Nao foi possivel extrair SharedSupport.dmg"
-            info "Convertendo para HFS... (pode demorar)"
-            dmg2img "$shared_dmg" "$WORK_DIR/installer.hfs" 2>&1 || error "Falha na conversao dmg2img"
-            INSTALLER_HFS="$WORK_DIR/installer.hfs"
+            apple_extract_shared_support "$pkg_file"
             ;;
         4)
             step "Selecionar arquivo do instalador"
@@ -118,13 +88,117 @@ create_offline_installer() {
                 error "Nenhum arquivo selecionado."
             fi
             ;;
+        5)
+            # Procurar SharedSupport.dmg em locais comuns
+            local ss_candidates=()
+            for loc in /tmp "$(pwd)" "$WORK_DIR" "$WORK_DIR/pkg_ex" "$HOME"; do
+                [ -f "$loc/SharedSupport.dmg" ] && ss_candidates+=("$loc/SharedSupport.dmg")
+            done
+
+            if [ ${#ss_candidates[@]} -gt 0 ]; then
+                echo ""
+                echo -e "  ${BOLD}SharedSupport.dmg encontrados:${NC}"
+                for i in "${!ss_candidates[@]}"; do
+                    echo -e "  ${GREEN}[$((i+1))]${NC}  ${ss_candidates[$i]}  ${DIM}($(du -h "${ss_candidates[$i]}" | cut -f1))${NC}"
+                done
+                echo ""
+                if [ ${#ss_candidates[@]} -eq 1 ]; then
+                    INSTALLER_SHARED_DMG="${ss_candidates[0]}"
+                    info "Usando: $INSTALLER_SHARED_DMG"
+                else
+                    echo -e "  Escolha:"
+                    read -r ss_ch
+                    INSTALLER_SHARED_DMG="${ss_candidates[$((ss_ch - 1))]}"
+                fi
+            else
+                echo -e "  Caminho para o SharedSupport.dmg:"
+                read -r ss_path
+                [ -f "$ss_path" ] || error "Ficheiro nao encontrado: $ss_path"
+                INSTALLER_SHARED_DMG="$ss_path"
+            fi
+
+            # BaseSystem.dmg e necessario separadamente (macOS moderno usa APFS no SharedSupport)
+            # Procurar localmente primeiro, depois baixar da Apple
+            local base_found=""
+            for loc in /tmp "$(pwd)" "$WORK_DIR" "$WORK_DIR/pkg_ex" "$HOME"; do
+                if [ -f "$loc/BaseSystem.dmg" ]; then
+                    local bsize; bsize=$(stat -c%s "$loc/BaseSystem.dmg" 2>/dev/null || echo 0)
+                    if [ "$bsize" -gt 1048576 ] 2>/dev/null; then
+                        base_found="$loc/BaseSystem.dmg"
+                        break
+                    fi
+                fi
+            done
+
+            if [ -n "$base_found" ]; then
+                INSTALLER_BASE_DMG="$base_found"
+                info "BaseSystem.dmg encontrado: $base_found ($(du -h "$base_found" | cut -f1))"
+            else
+                info "BaseSystem.dmg nao encontrado localmente — baixando da Apple (~500 MB)..."
+                echo ""
+                echo -e "  ${BOLD}Versao do macOS (para baixar BaseSystem.dmg via macrecovery):${NC}"
+                echo ""
+                echo -e "  ${GREEN}[1]${NC}  macOS Sonoma (14)"
+                echo -e "  ${GREEN}[2]${NC}  macOS Sequoia (15)"
+                echo -e "  ${GREEN}[3]${NC}  macOS Ventura (13)"
+                echo -e "  ${GREEN}[4]${NC}  macOS Monterey (12)"
+                echo ""
+                echo -e "  Escolha [1-4] (padrao: 1):"
+                read -r base_ver_choice
+                local base_board
+                case "$base_ver_choice" in
+                    2) base_board="Mac-937A206F2EE63C01" ;;  # Sequoia
+                    3) base_board="Mac-4B682C642B45593E" ;;  # Ventura
+                    4) base_board="Mac-FFE5EF870D7BA81A" ;;  # Monterey
+                    *) base_board="Mac-827FAC58A8FDFA22" ;;  # Sonoma
+                esac
+
+                # Usar macrecovery para baixar BaseSystem.dmg
+                if [ ! -f "$WORK_DIR/macrecovery/macrecovery.py" ]; then
+                    info "Clonando macrecovery do OpenCorePkg..."
+                    rm -rf "$WORK_DIR/opencore_tmp"
+                    git clone --depth 1 --filter=blob:none --sparse \
+                        https://github.com/acidanthera/OpenCorePkg.git "$WORK_DIR/opencore_tmp" 2>&1
+                    cd "$WORK_DIR/opencore_tmp"
+                    git sparse-checkout set Utilities/macrecovery 2>&1
+                    mkdir -p "$WORK_DIR/macrecovery"
+                    cp -r Utilities/macrecovery/* "$WORK_DIR/macrecovery/"
+                    cd "$WORK_DIR"
+                    rm -rf "$WORK_DIR/opencore_tmp"
+                fi
+
+                local base_dl_dir="$WORK_DIR/base_recovery"
+                mkdir -p "$base_dl_dir"
+                info "Baixando BaseSystem.dmg via macrecovery..."
+                cd "$WORK_DIR/macrecovery"
+                python3 macrecovery.py -b "$base_board" -m 00000000000000000 -o "$base_dl_dir" download 2>&1
+                cd "$WORK_DIR"
+
+                if [ -f "$base_dl_dir/BaseSystem.dmg" ]; then
+                    INSTALLER_BASE_DMG="$base_dl_dir/BaseSystem.dmg"
+                    info "BaseSystem.dmg baixado ($(du -h "$INSTALLER_BASE_DMG" | cut -f1))"
+                elif [ -f "$base_dl_dir/RecoveryImage.dmg" ]; then
+                    INSTALLER_BASE_DMG="$base_dl_dir/RecoveryImage.dmg"
+                    info "RecoveryImage.dmg baixado ($(du -h "$INSTALLER_BASE_DMG" | cut -f1))"
+                else
+                    error "Falha ao baixar BaseSystem.dmg. Verifique sua conexao."
+                fi
+            fi
+            ;;
         *)
             error "Opcao invalida"
             ;;
     esac
 
-    [ -f "$INSTALLER_HFS" ] || error "Arquivo do instalador nao encontrado: ${INSTALLER_HFS:-vazio}"
-    info "Instalador: $INSTALLER_HFS ($(du -h "$INSTALLER_HFS" | cut -f1))"
+    if [ -n "$INSTALLER_HFS" ]; then
+        [ -f "$INSTALLER_HFS" ] || error "Arquivo do instalador nao encontrado: ${INSTALLER_HFS:-vazio}"
+        info "Instalador: $INSTALLER_HFS ($(du -h "$INSTALLER_HFS" | cut -f1))"
+    elif [ -n "$INSTALLER_SHARED_DMG" ]; then
+        [ -f "$INSTALLER_SHARED_DMG" ] || error "SharedSupport.dmg nao encontrado: ${INSTALLER_SHARED_DMG:-vazio}"
+        info "SharedSupport.dmg: $(du -h "$INSTALLER_SHARED_DMG" | cut -f1)"
+    else
+        error "Nenhuma imagem do instalador selecionada"
+    fi
 
     step "Selecionar pendrive"
     select_usb
@@ -152,10 +226,14 @@ create_offline_installer() {
     mkfs.vfat -F 32 -n "EFI" "$p1" 2>&1
 
     step "Gravando instalador no pendrive"
-    info "Gravando $(basename "$INSTALLER_HFS") → $p2"
     info "Isso pode demorar varios minutos..."
-    dd if="$INSTALLER_HFS" of="$p2" bs=4M status=progress conv=fsync 2>&1 \
-        || error "Falha ao gravar imagem do instalador"
+    if [ -n "$INSTALLER_HFS" ]; then
+        info "Gravando $(basename "$INSTALLER_HFS") → $p2"
+        dd if="$INSTALLER_HFS" of="$p2" bs=4M status=progress conv=fsync 2>&1 \
+            || error "Falha ao gravar imagem do instalador"
+    elif [ -n "$INSTALLER_SHARED_DMG" ]; then
+        write_installer_to_partition "$p2" "$INSTALLER_SHARED_DMG"
+    fi
 
     step "Configurando OpenCore na EFI"
     EFI_MOUNT="$WORK_DIR/efi_offline"

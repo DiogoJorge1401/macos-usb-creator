@@ -36,7 +36,7 @@ oc_fetch_kexts() {
     local cache="$_OC_CACHE"
     local extract_dir="$WORK_DIR/oc_extract/$(echo "$repo" | tr '/' '_')"
     rm -rf "$extract_dir"; mkdir -p "$extract_dir"
-    7z x "$cache" -o"$extract_dir" -y > /dev/null 2>&1 || true
+    bsdtar -xf "$cache" -C "$extract_dir" 2>/dev/null || true
     local found=0
     while IFS= read -r -d '' k; do
         cp -r "$k" "$dest_kexts/"
@@ -61,7 +61,7 @@ build_opencore_efi() {
     local oc_cache="$_OC_CACHE"
     local oc_ex="$WORK_DIR/oc_extract/OpenCorePkg"
     rm -rf "$oc_ex"; mkdir -p "$oc_ex"
-    7z x "$oc_cache" -o"$oc_ex" -y > /dev/null 2>&1 || true
+    bsdtar -xf "$oc_cache" -C "$oc_ex" 2>/dev/null || true
 
     local bootx64; bootx64=$(find "$oc_ex" -name "BOOTx64.efi" | head -1)
     [ -f "$bootx64" ] && cp "$bootx64" "$efi_dir/BOOT/" && info "  ✓ BOOTx64.efi"

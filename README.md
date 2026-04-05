@@ -35,7 +35,7 @@ Supported models (selectable in the menu):
 ## Requirements
 
 - Linux (Arch/CachyOS, Debian/Ubuntu, Fedora)
-- `dmg2img`, `sgdisk`, `mkfs.vfat`, `python3`, `git`, `bsdtar`, `7z`
+- `dmg2img`, `sgdisk`, `mkfs.vfat`, `python3`, `git`, `bsdtar`
 - USB drive: 4 GB+ for recovery · **32 GB+ for offline installer**
 - Internet on the Linux machine (to download OpenCore and kexts)
 
